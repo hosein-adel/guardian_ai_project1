@@ -9,6 +9,12 @@ FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
 
+# Auth (single admin role)
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+# Hashed password (werkzeug pbkdf2 format). Generate with: python tools/gen_password.py
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+
 # OpenAI / GapGPT
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.gapgpt.app/v1")

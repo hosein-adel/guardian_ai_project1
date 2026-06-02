@@ -20,7 +20,12 @@ def app():
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    """Test client pre-authenticated as admin so existing tests keep passing."""
+    with app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["logged_in"] = True
+            sess["username"] = "admin"
+        yield c
 
 
 @pytest.fixture

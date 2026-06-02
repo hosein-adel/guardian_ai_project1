@@ -6,7 +6,7 @@ import base64
 import threading
 import uuid
 import traceback
-from flask import Flask, render_template, jsonify, request, g
+from flask import Flask, render_template, jsonify, request, g, redirect, url_for
 import config
 
 # Load .env explicitly if needed
@@ -38,6 +38,7 @@ except Exception:
 from core.guardian import GuardianCore, AlertService
 from services.esp32 import ESP32Client
 from core.state import SharedState
+import auth
 
 # ============================================================
 # Setup
@@ -45,6 +46,14 @@ from core.state import SharedState
 setup_logging()
 logger = get_logger("app")
 app = Flask(__name__)
+
+# Session secret. Falls back to a random key if SECRET_KEY is not set in .env
+# (a random key logs everyone out on restart — set SECRET_KEY in .env for stable sessions).
+app.secret_key = config.SECRET_KEY or os.urandom(32)
+if not config.SECRET_KEY:
+    logger.warning("SECRET_KEY not set in .env — using a random key (sessions reset on restart)")
+if not config.ADMIN_PASSWORD_HASH:
+    logger.warning("ADMIN_PASSWORD_HASH not set in .env — all logins will be rejected")
 
 shared_state = SharedState()
 
@@ -102,6 +111,48 @@ class GuardianRunner:
         return {"ok": True, "message": "Guardian stopped"}
 
 guardian_runner = GuardianRunner(core)
+
+# ============================================================
+# Auth guard — protects the dashboard and every /api route
+# ============================================================
+
+@app.before_request
+def require_login():
+    if request.endpoint in auth.PUBLIC_ENDPOINTS:
+        return None
+    if auth.is_logged_in():
+        return None
+    return auth._auth_failed_response()
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if auth.is_logged_in():
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if auth.verify_credentials(username, password):
+            auth.login_user()
+            logger.info("Admin login successful")
+            next_url = request.args.get("next") or url_for("index")
+            # Only allow local redirects
+            if not next_url.startswith("/"):
+                next_url = url_for("index")
+            return redirect(next_url)
+        error = "نام کاربری یا رمز عبور اشتباه است"
+        logger.warning("Failed login attempt")
+
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    auth.logout_user()
+    return redirect(url_for("login"))
+
 
 # ============================================================
 # Routes
