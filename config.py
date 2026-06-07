@@ -23,6 +23,23 @@ OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "shimmer")
 OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "whisper-1")
 
+# Default language sent to Whisper for speech-to-text. Can be changed at
+# runtime from the dashboard settings (stored in SharedState).
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "fa")
+
+
+def load_system_prompt(default=""):
+    """Read the initial AI system prompt from prompts/system.txt if present."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "system.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return default
+
+
+SYSTEM_PROMPT = load_system_prompt()
+
 # ESP32
 ESP32_IP = os.getenv("ESP32_IP", "192.168.43.219")
 ESP32_BASE_URL = os.getenv("ESP32_BASE_URL", f"http://{ESP32_IP}")

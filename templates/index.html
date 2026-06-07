@@ -718,6 +718,12 @@
           </div>
 
           <div class="pill">
+            <span>🌡️</span>
+            <span data-i18n="warmup_label">گرم شدن سنسور:</span>
+            <strong id="warmup-status-pill">--</strong>
+          </div>
+
+          <div class="pill">
             <span>🎙️</span>
             <span>STT:</span>
             <strong id="stt-status-pill">--</strong>
@@ -1060,7 +1066,7 @@
     </p>
   </div>
 
-  <audio id="alarmAudio" preload="auto"></audio>
+  <audio id="alarmAudio" src="/static/alarm.mp3" preload="auto" loop></audio>
   <div id="toast-wrap" class="toast-wrap"></div>
 
   <script>
@@ -1069,6 +1075,10 @@
       lastData: null,
       localAlarmMuted: null,
       pollingMs: 1000,
+      sse: null,
+      pollTimer: null,
+      audioUnlocked: false,
+      alarmPlaying: false,
       defaults: {
         ESP32_IP: '',
         TEMPERATURE_THRESHOLD: 50,
@@ -1085,6 +1095,11 @@
         connection_label: 'وضعیت ارتباط',
         offline: 'آفلاین',
         online: 'آنلاین',
+        warmup_label: 'گرم شدن سنسور:',
+        warmup_ready: 'آماده',
+        warmup_running: 'در حال گرم شدن…',
+        live_label: 'زنده',
+        config_loaded_hw: 'تنظیمات از سخت‌افزار بارگذاری شد',
         time_label: 'زمان محلی',
         language_label: 'زبان رابط کاربری',
         sensors_title: 'نمایشگر سنسورها',
@@ -1176,6 +1191,11 @@
         connection_label: 'Connection Status',
         offline: 'Offline',
         online: 'Online',
+        warmup_label: 'Sensor warm-up:',
+        warmup_ready: 'Ready',
+        warmup_running: 'Warming up…',
+        live_label: 'Live',
+        config_loaded_hw: 'Settings loaded from hardware',
         time_label: 'Local Time',
         language_label: 'Interface Language',
         sensors_title: 'Sensors Overview',
@@ -1443,6 +1463,11 @@
       updateBooleanSensor('door', data.door, t('open'), t('closed'));
       updateBooleanSensor('motion', data.motion, t('detected'), t('not_detected'));
 
+      // Per-reason highlight straight from hardware alarm_reasons.
+      const reasons = data.alarm_reasons || {};
+      if (reasons.gas_alarm) applyBadgeClass('mq9-state', 'alert');
+      if (reasons.temp_alarm) applyBadgeClass('temperature-state', 'alert');
+
       setPill('guardian-status-pill', boolish(data.guardian_status), t('active'), t('inactive'));
       setPill('alarm-status-pill', boolish(data.alarm_status), t('active'), t('inactive'));
       setPill('stt-status-pill', boolish(data.stt_active), t('active'), t('inactive'));
@@ -1457,9 +1482,65 @@
         el('alarm-muted-status-pill').textContent = state.localAlarmMuted ? t('muted') : t('unmuted');
       }
 
+      // Warm-up indicator (MQ9 needs ~30s on real hardware before readings are valid).
+      updateWarmupPill(data.warmup_done);
+
+      // Drive the alarm sound from the live hardware alarm + server mute state.
+      const muted = data.alarm_muted !== undefined ? boolish(data.alarm_muted) : (state.localAlarmMuted === true);
+      updateAlarmSound(boolish(data.alarm_status), muted);
+
       el('last-voice-command').textContent = safeText(data.last_voice_command, '--');
 
       updateQuickSnapshot(data);
+    }
+
+    function updateWarmupPill(warmupDone){
+      const pill = el('warmup-status-pill');
+      if (!pill) return;
+      const done = boolish(warmupDone);
+      pill.textContent = done ? t('warmup_ready') : t('warmup_running');
+      const badge = pill.parentElement;
+      badge.classList.remove('ok', 'warn');
+      badge.classList.add(done ? 'ok' : 'warn');
+    }
+
+    // ---- Alarm sound (static/alarm.mp3) ----
+    function unlockAudio(){
+      if (state.audioUnlocked) return;
+      const a = el('alarmAudio');
+      if (!a) return;
+      // Browsers require a user gesture before audio can play. Prime it muted.
+      a.muted = true;
+      a.play().then(() => {
+        a.pause();
+        a.currentTime = 0;
+        a.muted = false;
+        state.audioUnlocked = true;
+        // If an alarm is already active, start it now.
+        if (state.lastData) {
+          const d = state.lastData;
+          const muted = d.alarm_muted !== undefined ? boolish(d.alarm_muted) : (state.localAlarmMuted === true);
+          updateAlarmSound(boolish(d.alarm_status), muted);
+        }
+      }).catch(() => { a.muted = false; });
+    }
+
+    function updateAlarmSound(alarmOn, muted){
+      const a = el('alarmAudio');
+      if (!a) return;
+      const shouldPlay = alarmOn && !muted;
+      if (shouldPlay && !state.alarmPlaying){
+        if (!state.audioUnlocked){
+          // Not yet unlocked — will start as soon as the user interacts.
+          return;
+        }
+        a.currentTime = 0;
+        a.play().then(() => { state.alarmPlaying = true; }).catch(() => {});
+      } else if (!shouldPlay && state.alarmPlaying){
+        a.pause();
+        a.currentTime = 0;
+        state.alarmPlaying = false;
+      }
     }
 
     function updateClock(){
@@ -1517,6 +1598,12 @@
       return data;
     }
 
+    function applyData(data){
+      const espOnline = data.online !== undefined ? boolish(data.online) : boolish(data.esp32_connected);
+      setConnection(espOnline);
+      updateUI(data);
+    }
+
     async function fetchGuardianData(){
       const requestId = newRequestId('poll');
       try{
@@ -1528,12 +1615,64 @@
         const data = await res.json();
         data.request_id = data.request_id || responseId;
         if (!res.ok || data.ok === false) throw new Error(errorWithRequestId(data.error || t('request_failed'), data.request_id));
-        const espOnline = data.online !== undefined ? boolish(data.online) : boolish(data.esp32_connected);
-        setConnection(espOnline);
-        updateUI(data);
+        applyData(data);
       }catch(err){
         setConnection(false);
         console.error('[fetchGuardianData]', err.message || err);
+      }
+    }
+
+    // ---- Real-time stream (SSE) with automatic polling fallback ----
+    function startStream(){
+      stopPolling();
+      try{
+        const es = new EventSource('/api/stream');
+        state.sse = es;
+        es.onmessage = (ev) => {
+          try{
+            const data = JSON.parse(ev.data);
+            applyData(data);
+            el('polling-indicator').textContent = t('live_label');
+          }catch(e){ /* ignore malformed frame */ }
+        };
+        es.onerror = () => {
+          // Connection dropped — close and fall back to polling.
+          es.close();
+          state.sse = null;
+          startPolling();
+        };
+      }catch(e){
+        startPolling();
+      }
+    }
+
+    function startPolling(){
+      if (state.pollTimer) return;
+      fetchGuardianData();
+      state.pollTimer = setInterval(fetchGuardianData, state.pollingMs);
+      el('polling-indicator').textContent = `${state.pollingMs/1000}s`;
+      // Try to restore the realtime stream after a short delay.
+      setTimeout(() => { if (!state.sse) startStream(); }, 5000);
+    }
+
+    function stopPolling(){
+      if (state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+    }
+
+    async function loadConfigFromHardware(){
+      try{
+        const res = await fetch('/api/config', { cache:'no-store' });
+        const data = await res.json();
+        const cfg = (data && data.config) || {};
+        if (cfg.ESP32_IP !== undefined && cfg.ESP32_IP !== null) el('esp32-ip-input').value = cfg.ESP32_IP || '';
+        if (cfg.temp_threshold !== undefined && cfg.temp_threshold !== null) el('temp-threshold-input').value = cfg.temp_threshold;
+        if (cfg.gas_threshold !== undefined && cfg.gas_threshold !== null) el('gas-threshold-input').value = cfg.gas_threshold;
+        if (cfg.STT_LANGUAGE) el('stt-language-select').value = cfg.STT_LANGUAGE;
+        if (cfg.SYSTEM_PROMPT !== undefined && cfg.SYSTEM_PROMPT !== null) el('system-prompt-input').value = cfg.SYSTEM_PROMPT || '';
+        return cfg;
+      }catch(err){
+        console.error('[loadConfigFromHardware]', err.message || err);
+        return null;
       }
     }
 
@@ -1566,6 +1705,8 @@
         const payload = collectConfigPayload();
         const data = await postAction('/api/config', payload);
         showToast(data.status || t('config_saved'), 'success');
+        // Reload so inputs reflect what the hardware actually stored.
+        await loadConfigFromHardware();
         await fetchGuardianData();
       }catch(err){
         showToast(err.message || t('network_error'), 'error');
@@ -1631,26 +1772,34 @@
       el('chat-send-btn').addEventListener('click', sendChat);
       el('save-config-btn').addEventListener('click', saveConfig);
 
-      el('load-config-btn').addEventListener('click', () => {
-        loadDefaultsToUI();
-        showToast(t('defaults_loaded'), 'info', 5000);
+      el('load-config-btn').addEventListener('click', async () => {
+        await loadConfigFromHardware();
+        showToast(t('config_loaded_hw'), 'info', 4000);
       });
 
       el('chat-input').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') sendChat();
       });
 
+      // Unlock alarm audio on the very first user interaction (browser autoplay policy).
+      const unlockOnce = () => {
+        unlockAudio();
+        window.removeEventListener('pointerdown', unlockOnce);
+        window.removeEventListener('keydown', unlockOnce);
+      };
+      window.addEventListener('pointerdown', unlockOnce);
+      window.addEventListener('keydown', unlockOnce);
+
     }
 
     function init(){
       bindEvents();
-      loadDefaultsToUI();
+      loadConfigFromHardware();
       setLang(state.lang);
       updateClock();
       setInterval(updateClock, 1000);
-      fetchGuardianData();
-      setInterval(fetchGuardianData, state.pollingMs);
-      el('polling-indicator').textContent = `${state.pollingMs/1000}s`;
+      // Real-time updates via SSE (falls back to polling automatically).
+      startStream();
     }
 
     window.addEventListener('DOMContentLoaded', init);

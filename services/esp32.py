@@ -183,6 +183,81 @@ class ESP32Client:
         return self.get_sensor_data()
 
 
+    def get_config(self):
+        """
+        خواندن تنظیمات/آستانه‌ها از خود ESP32.
+
+        طبق main.py مسیر زیر وجود دارد:
+        GET /config
+
+        خروجی مورد انتظار:
+        {
+            "gas_threshold": 2000,
+            "temp_threshold": 50,
+            "flame_enabled": true,
+            "motion_enabled": true,
+            "door_enabled": true,
+            "device_name": "Guardian ESP32",
+            "read_interval": 2
+        }
+
+        اگر ESP32 در دسترس نباشد، یک dict با esp32_online=False برمی‌گرداند
+        تا داشبورد کرش نکند.
+        """
+
+        url = f"{self.base_url}/config"
+
+        try:
+            response = requests.get(url, timeout=self.timeout, proxies=self.proxies)
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError("config response is not a JSON object")
+            self._mark_online()
+            data["esp32_online"] = True
+            data["source"] = "esp32"
+            return data
+
+        except requests.exceptions.RequestException as e:
+            self._mark_offline()
+            self._log_issue("get_config", f"[ESP32Client] Could not read config from ESP32: {url}", e)
+            return {
+                "esp32_online": False,
+                "esp32_base_url": self.base_url,
+                "esp32_last_error": "get_config",
+                "esp32_last_error_detail": str(e),
+                "source": "fallback",
+                "error": "get_config",
+            }
+        except (ValueError, json.JSONDecodeError) as e:
+            self._mark_offline()
+            self._log_issue("get_config_json", f"[ESP32Client] Invalid config JSON from ESP32: {url}", e)
+            return {
+                "esp32_online": False,
+                "esp32_base_url": self.base_url,
+                "esp32_last_error": "invalid_config_json",
+                "esp32_last_error_detail": str(e),
+                "source": "fallback",
+                "error": "invalid_config_json",
+            }
+
+    def set_base_url(self, esp32_ip):
+        """
+        تغییر آدرس ESP32 در زمان اجرا (برای سوییچ بین شبیه‌ساز و سخت‌افزار از داشبورد).
+        ورودی می‌تواند IP خام یا URL کامل باشد.
+        """
+        esp32_ip = str(esp32_ip or "").strip()
+        if not esp32_ip:
+            return self.base_url
+        if esp32_ip.startswith("http://") or esp32_ip.startswith("https://"):
+            self.base_url = esp32_ip.rstrip("/")
+        else:
+            self.base_url = f"http://{esp32_ip}:{self.port}"
+        # اتصال جدید را دوباره ارزیابی کن
+        self._last_online = None
+        print(f"[ESP32Client] Base URL changed to: {self.base_url}")
+        return self.base_url
+
     def send_config(self, config_data):
         """
         ارسال تنظیمات به ESP32.

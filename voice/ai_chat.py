@@ -16,10 +16,17 @@ class AIChatEngine:
             self.client = None
             print("[AIChatEngine] No API Key found!")
 
-    def chat(self, user_text: str, sensor_context: dict = None, raise_errors: bool = False) -> str:
+    def chat(self, user_text: str, sensor_context: dict = None, raise_errors: bool = False,
+             system_prompt: str = None) -> str:
         if not self.client: return "کلید API تنظیم نشده است."
-        
-        messages = [{"role": "system", "content": "You are Guardian AI. Answer concisely in Persian."}]
+
+        # Runtime system prompt (from dashboard settings) overrides the default.
+        if not system_prompt:
+            system_prompt = getattr(self.config, "SYSTEM_PROMPT", "") if self.config else ""
+        if not system_prompt:
+            system_prompt = "You are Guardian AI. Answer concisely in Persian."
+
+        messages = [{"role": "system", "content": system_prompt}]
         if sensor_context:
             messages.append({"role": "system", "content": f"Sensor Data: {json.dumps(sensor_context)}"})
         messages.append({"role": "user", "content": user_text})

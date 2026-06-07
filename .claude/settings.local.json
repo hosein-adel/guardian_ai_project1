@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from werkzeug.security import generate_password_hash; import secrets; print\\('HASH='+generate_password_hash\\('admin1234'\\)\\); print\\('SECRET='+secrets.token_hex\\(32\\)\\)\")",
+      "Bash(python -c \"import flask; print\\(flask.__file__\\)\")",
+      "Bash(ls -d venv .venv env)",
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(python -c \"import hashlib,secrets; salt=secrets.token_hex\\(8\\); it=600000; h=hashlib.pbkdf2_hmac\\('sha256',b'admin1234',salt.encode\\(\\),it\\).hex\\(\\); print\\('ADMIN_PASSWORD_HASH=pbkdf2:sha256:%d\\\\$%s\\\\$%s'%\\(it,salt,h\\)\\); print\\('SECRET_KEY='+secrets.token_hex\\(32\\)\\)\")"
+    ]
+  }
+}

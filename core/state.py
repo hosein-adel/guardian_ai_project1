@@ -27,9 +27,35 @@ class SharedState:
         self.current_data_lock = threading.Lock()
 
         self.last_error = ""
-        
+
         # New fields to prevent AttributeError in app.py
         self.stt_active = False
+
+        # Runtime-adjustable settings (changed from the dashboard at runtime).
+        # Initialized from config in app.py.
+        self.settings = {
+            "STT_LANGUAGE": "fa",
+            "SYSTEM_PROMPT": "",
+            "ESP32_IP": "",
+        }
+
+    def get_setting(self, key, default=None):
+        with self._lock:
+            return self.settings.get(key, default)
+
+    def set_setting(self, key, value):
+        with self._lock:
+            self.settings[key] = value
+
+    def update_settings(self, values: dict):
+        with self._lock:
+            for k, v in (values or {}).items():
+                self.settings[k] = v
+            return dict(self.settings)
+
+    def get_settings(self) -> dict:
+        with self._lock:
+            return dict(self.settings)
 
     def set_guardian_active(self, value: bool):
         with self._lock:

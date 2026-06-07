@@ -218,12 +218,13 @@ class GuardianCore(threading.Thread):
             return "هشدار بررسی شد"
         return f"پیام دریافت شد: {text}"
 
-    def chat(self, text, speak=True, raise_errors=False):
+    def chat(self, text, speak=True, raise_errors=False, system_prompt=None):
         if self.ai_chat is not None:
             try:
                 ctx = self.shared_state.current_data if hasattr(self.shared_state, "current_data") else {}
                 try:
-                    reply = self.ai_chat.chat(text, sensor_context=ctx, raise_errors=raise_errors)
+                    reply = self.ai_chat.chat(text, sensor_context=ctx, raise_errors=raise_errors,
+                                              system_prompt=system_prompt)
                 except TypeError:
                     reply = self.ai_chat.chat(text, sensor_context=ctx)
                 if speak and self.tts_engine:
